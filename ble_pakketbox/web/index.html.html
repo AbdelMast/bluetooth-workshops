@@ -65,7 +65,7 @@
   // Verbinding starten, service/characteristics ophalen, notificaties starten
   function connectToDevice() {
     navigator.bluetooth.requestDevice({
-      filters: [{ name: deviceName }],
+      filters: [{services: [bleService]}],
       optionalServices: [bleService]
     })
     .then(device => {
