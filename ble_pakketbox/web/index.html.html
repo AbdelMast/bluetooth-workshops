@@ -1,0 +1,132 @@
+<!DOCTYPE html>
+<html lang="nl">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Slimme pakketbox</title>
+  <style>
+    body { font-family: Arial, sans-serif; max-width: 420px; margin: 24px auto; padding: 0 16px; text-align: center; }
+    button { font-size: 1.2rem; padding: 14px 28px; margin: 8px; border: none; border-radius: 10px; cursor: pointer; }
+    #connectBtn { background: #1565c0; color: #fff; }
+    #openBtn { background: #2e7d32; color: #fff; }
+    #closeBtn { background: #c62828; color: #fff; }
+    .card { border: 1px solid #ccc; border-radius: 12px; padding: 12px; margin: 16px 0; }
+    #bleState { font-weight: bold; }
+    .big { font-size: 1.6rem; font-weight: bold; }
+  </style>
+</head>
+<body>
+  <h1>📦 Slimme pakketbox</h1>
+
+  <button id="connectBtn">Verbinden</button>
+  <p>BLE-status: <span id="bleState">Niet verbonden</span></p>
+
+  <div>
+    <button id="openBtn">Open</button>
+    <button id="closeBtn">Dicht</button>
+  </div>
+
+  <div class="card">
+    <div>Status van de box (van ESP32):</div>
+    <div class="big" id="valueContainer">-</div>
+    <small>Laatste update: <span id="timestamp">-</span></small>
+  </div>
+
+  <div class="card">
+    Laatst verzonden commando: <span id="latestValueSent">-</span>
+  </div>
+
+<script>
+  // UUID's: moeten 100% overeenkomen met config.h
+  const deviceName = 'Pakketbox-ESP32';
+  const bleService = '19b10000-e8f2-537e-4f6c-d104768a1214';
+  const statusCharacteristic = '19b10001-e8f2-537e-4f6c-d104768a1214';
+  const lockCharacteristic = '19b10002-e8f2-537e-4f6c-d104768a1214';
+
+  // HTML-elementen
+  const connectBtn = document.getElementById('connectBtn');
+  const openBtn = document.getElementById('openBtn');
+  const closeBtn = document.getElementById('closeBtn');
+  const bleStateContainer = document.getElementById('bleState');
+  const retrievedValue = document.getElementById('valueContainer');
+  const latestValueSent = document.getElementById('latestValueSent');
+  const timestampContainer = document.getElementById('timestamp');
+
+  // BLE-objecten
+  let bleServer = null;
+  let bleServiceFound = null;
+  let statusCharacteristicFound = null;
+
+  // Event listeners voor de knoppen
+  connectBtn.addEventListener('click', connectToDevice);
+  openBtn.addEventListener('click', () => writeOnCharacteristic(1));
+  closeBtn.addEventListener('click', () => writeOnCharacteristic(0));
+
+  // Verbinding starten, service/characteristics ophalen, notificaties starten
+  function connectToDevice() {
+    navigator.bluetooth.requestDevice({
+      filters: [{ name: deviceName }],
+      optionalServices: [bleService]
+    })
+    .then(device => {
+      device.addEventListener('gattserverdisconnected', onDisconnected);
+      return device.gatt.connect();
+    })
+    .then(gattServer => {
+      bleServer = gattServer;
+      bleStateContainer.innerHTML = 'Verbonden';
+      return bleServer.getPrimaryService(bleService);
+    })
+    .then(service => {
+      bleServiceFound = service;
+      return service.getCharacteristic(statusCharacteristic);
+    })
+    .then(characteristic => {
+      statusCharacteristicFound = characteristic;
+      characteristic.addEventListener('characteristicvaluechanged', handleCharacteristicChange);
+      return characteristic.startNotifications(); // notificaties actief starten
+    })
+    .then(() => statusCharacteristicFound.readValue()) // beginstatus meteen tonen
+    .then(value => showStatus(new TextDecoder().decode(value)))
+    .catch(error => console.log('Fout bij verbinden: ', error));
+  }
+
+  // Commando versturen (1 = open, 0 = dicht) en UI bijwerken
+  function writeOnCharacteristic(value) {
+    if (bleServer && bleServer.connected) {
+      bleServiceFound.getCharacteristic(lockCharacteristic)
+      .then(characteristic => {
+        const data = new Uint8Array([value]);   // waarde omzetten naar bytes
+        return characteristic.writeValue(data); // schrijven naar ESP32
+      })
+      .then(() => {
+        // HIER WORDT HET SCHERM BIJGEWERKT (verzonden commando)
+        latestValueSent.innerHTML = value === 1 ? 'Open (1)' : 'Dicht (0)';
+        console.log('Waarde geschreven naar slot-characteristic:', value);
+      })
+      .catch(error => console.error('Fout bij schrijven: ', error));
+    } else {
+      console.error('Niet verbonden met de ESP32.');
+    }
+  }
+
+  // Inkomende notificatie van de ESP32 verwerken
+  function handleCharacteristicChange(event) {
+    const value = new TextDecoder().decode(event.target.value); // bytes -> tekst
+    console.log('Ontvangen status:', value);
+    showStatus(value);
+  }
+
+  // HIER WORDEN DE HTML-ELEMENTEN OP HET SCHERM BIJGEWERKT (status + tijdstip)
+  function showStatus(value) {
+    retrievedValue.innerHTML = value;
+    timestampContainer.innerHTML = new Date().toLocaleTimeString();
+  }
+
+  function onDisconnected() {
+    bleStateContainer.innerHTML = 'Niet verbonden';
+    console.log('Verbinding met ESP32 verbroken.');
+  }
+</script>
+</body>
+</html>
